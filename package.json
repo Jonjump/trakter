@@ -1,0 +1,23 @@
+{
+  "name": "trakter",
+  "version": "0.0.0",
+  "description": "simple node module for trakt.tv V2 api",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jonjump/trakter.git"
+  },
+  "keywords": [
+    "trakt.tv",
+    "api"
+  ],
+  "author": "jonjump",
+  "license": "GPLV2",
+  "bugs": {
+    "url": "https://github.com/Jonjump/trakter/issues"
+  },
+  "homepage": "https://github.com/Jonjump/trakter"
+}
