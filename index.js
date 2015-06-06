@@ -1,11 +1,7 @@
 /**
- * Provides the base trakter class...
- *
- * @module trakter
- */
-/**
-* trakt.tv interface for version 2 api
 *
+* Provides access from node to the Trakt API Version 2
+* 
 * @class trakter
 * @static
 * @requires https
@@ -13,7 +9,7 @@
 module.exports = {
     getConfig: getConfig,
     setConfig: setConfig,
-    call: call
+    request: request
     };
 var https = require('https');
 var config;
@@ -26,18 +22,12 @@ var CODEOK = {
 
 // Public
 /** 
-* @for trakter
 * @method setConfig
 * @param {Object} config A config object
 * @param {Function} getPIN A function which returns a valid PIN
-* @param {Function} next,  called with err as a parameter 
-* @throws {TrakterGetToken} missing getToken function
+* @param {Function} next(err) 
 * @example
-*     trakter.setConfig( {DESCRIPTION OF CONFIG OBJECT
-*                      , 
-*                      getPIN,
-*                      next
-*                      )
+*     trakter.setConfig( {config,getPIN,next)
 */
 function setConfig (conf,getPIN,next) {
     // check the token
@@ -66,10 +56,11 @@ function setConfig (conf,getPIN,next) {
 
     if (!config.token) {
         if (!getPIN || typeof getPIN != 'function') {
-            var e = new Error ('Trakter: setConfig - missing getToken function');
-            e.name = 'TrakterGetToken';
-            e.code = 98
-            throw (e);
+            var e = new Error ('Trakter: setConfig - missing getPIN function');
+            e.name = 'TrakterGetPIN';
+            e.code = 98;
+            next (e);
+            return;
         }
         if (!conf.pinUrl || typeof conf.pinUrl != 'string') {
             next(new Error ('Trakter: No URL for PIN in configuration'));
@@ -81,36 +72,10 @@ function setConfig (conf,getPIN,next) {
     }
 }
 
-function exchangePIN(PIN,next)
-{
-    var options = makeOptions({path:'/oauth/token'});
-    var data = makeData({   code:PIN,
-                            grant_type:'authorization_code',
-                            response_type:'code' });
-    post(options,data,tokenDone, next);
-}
-
-function tokenDone(err,dataString,next)
-{
-    if (err) {
-        next (err);
-        return;
-    }
-    config.token = JSON.parse(dataString);
-    if (config.token.error) {
-        var e = new Error(config.token.error + ": " + config.token.error_description);
-        e.name = 'TrakterBadPIN';
-        e.code = 99
-        delete config.token
-        next (e);
-    } else {
-        next ();
-    }
-}
 /** 
 * Returns a copy of the configuration for trakter
 * 
-* Typically, this is then saved to a configuarion file
+* Typically, this is saved by your application for reuse later
 * @method getConfig
 * @example
 *     config = trakter.getConfig();
@@ -119,45 +84,62 @@ function getConfig () {
     return clone(config);
 }
 /** 
-* wrapper for https.request
+* make a request to Trakt.tv
 * @method request
-* @param {Object} config A config object
-* @param {Function} getPIN A function which returns a valid PIN
-* @param {Function} next,  called with err as a parameter 
-* @throws {TrakterGetToken} missing getToken function
+* @param {Object} options The options for the call
+* @param {Object} data The data for the call, or null
+* @param {Function} next(err,traktResponseString)
 * @example
-*     trakter.request(options,callback )
+*     trakter.request(options,data,next )
 */
-function call (options,data,next) 
+function request (suppliedOptions,data,next) 
 {
-    if ( !options.method || !CODEOK[options.method.toUpperCase()] ) {
-        var e = new Error('trakter: invalid method or not specified - must be GET, PUT, POST or DELETE');
-        e.name = 'TrakterBadMethod';
-        e.code = 97;
-        next (e);
-        return;
+    var options = makeOptions(suppliedOptions);
+    switch (options.method ? options.method.toUpperCase() : "BADMETHOD") {
+        case "PUT":
+        case "POST":
+                    var dataString = JSON.stringify(data);
+                    options.headers['Content-Length'] = dataString.length;
+                    var req = https.request(options,requestDone);
+                    req.end(dataString);
+                    break;
+        case "GET":
+        case "DELETE":
+                    var req = https.request(options,requestDone);
+                    req.end();
+                    break;
+                    
+        case "BADMETHOD":
+        default:
+                    var e = new Error('trakter: invalid method or not specified');
+                    e.name = 'TrakterBadMethod';
+                    e.code = 97;
+                    next (e);
+                    break;
     }
-    var req = https.request(makeOptions(options),requestDone)
-    req.on('error', function (err) {
-        console.log(err);
-        });
-    // req.end(dataString);
-    req.end("");
 
     function requestDone(res) {
         res.setEncoding('utf8');
         var responseString = '';
-        res.on('error', function() {
-            next (res.statusCode,responseString);
+        res.on('error', function(err) {
+            next (err,null);
         });
         res.on('data', function(data) {
             responseString += data;
         });
         res.on('end', function() {
-            next (checkError(options.method,res),responseString);
+            var err = checkError(options.method,res);
+            if ( err !== null) {
+                next (err);
+            } else {
+                next (null,JSON.parse(responseString));
+            }
         });
     }
 }
+/*
+-----------------------------------------------------------------------------------------------------------
+*/
 // returns Error object if error or null
 function checkError(method,res) {
     var descriptions = {
@@ -187,9 +169,29 @@ function checkError(method,res) {
     e.code = res.statusCode
     return e;
 }
-/*
------------------------------------------------------------------------------------------------------------
-*/
+function exchangePIN(PIN,next)
+{
+    var options = makeOptions({path:'/oauth/token', method:'POST'});
+    var data = makeData({   code:PIN,
+                             grant_type:'authorization_code',
+                             response_type:'code' });
+    // post(options,data,tokenDone, next);
+    request (options,data,tokenDone);
+
+
+    function tokenDone(err,data)
+    {
+        err = err || data.error;
+        if (err) {
+            next (err);
+            return;
+        }
+        
+        config.token = data;
+        next (null,data);
+    }
+}
+
 function makeOptions (suppliedOptions) {
     // augment supplied options with defaults 
     var options = clone(suppliedOptions);
@@ -198,7 +200,10 @@ function makeOptions (suppliedOptions) {
     options.headers = options.headers || {}
     options.headers['Content-type'] = options.headers['Content-type'] || config.options.headers['Content-type']; 
     options.headers['trakt-api-key'] = options.headers['trakt-api-key'] || config.options.headers['trakt-api-key']; 
-    options.headers['trakt-api-version'] = options.headers['trakt-api-version'] || config.options.headers['trakt-api-version']; 
+    options.headers['trakt-api-version'] = options.headers['trakt-api-version'] || config.options.headers['trakt-api-version'];
+    if (!options.headers['Authorization'] && config.token && config.token.access_token) {
+        options.headers['Authorization'] =  "Bearer "+config.token.access_token; 
+    }
     return options;
 }
     
@@ -215,33 +220,3 @@ function makeData (suppliedData) {
 function clone(obj) {
     return (obj) ? JSON.parse(JSON.stringify(obj)) : null ;
 }
-
-    
-function post(suppliedOptions, data, readDone, next){
-    var options = makeOptions(suppliedOptions);
-    options.method = 'POST';
-    var dataString = JSON.stringify(data);
-    options.headers['Content-Length'] = dataString.length;
-
-    var req = https.request(options, readPost);
-    req.on('error', function (err) {
-        console.log(err);
-        });
-    req.end(dataString);
-
-    function readPost(res) {
-        res.setEncoding('utf8');
-        var responseString = '';
-        res.on('error', function(err) {
-            readDone (err,responseString,next);
-        });
-        res.on('data', function(data) {
-            responseString += data;
-        });
-        res.on('end', function() {
-            readDone (null,responseString,next);
-        });
-    }
- 
-}
-
